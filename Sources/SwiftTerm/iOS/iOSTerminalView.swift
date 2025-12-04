@@ -1295,7 +1295,11 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
                 data = .bytes (returnByteSequence)
                 
             case .keyboardTab:
-                data = .bytes ([9])
+                if key.modifierFlags.contains(.shift) {
+                    data = .bytes(EscapeSequences.cmdBackTab)
+                } else {
+                    data = .bytes([9])
+                }
 
             case .keyboardF1:
                 data = .bytes (EscapeSequences.cmdF [1])
