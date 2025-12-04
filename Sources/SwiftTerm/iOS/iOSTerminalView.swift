@@ -175,6 +175,15 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
     // be removed afterwards by the input system (input methods will insert approximiations, mark and change on demand)
     var _markedTextRange: TextRange?
 
+    // Tracks how many characters in textInputStorage have been sent to the terminal.
+    // Marked/composing text is stored in textInputStorage but not sent until committed,
+    // so we need to track this to avoid sending backspaces for unsent text.
+    var sentToTerminalCount: Int = 0
+
+    // Tracks whether we're in an active dictation session. During dictation, intermediate
+    // results should not be sent to the terminal - only the final committed result.
+    var isDictating: Bool = false
+
     // The input delegate is part of UITextInput, and we notify it of changes.
     public weak var inputDelegate: UITextInputDelegate?
 
@@ -1091,7 +1100,11 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
         Soft keyboard input. Hardware keyboard input is handled in pressesBegan.
     */
     open func insertText(_ text: String) {
-        uitiLog("insertText(\"\(text)\") textInputStorage:\"\(textInputStorage)\"")
+        uitiLog("insertText(\"\(text)\") textInputStorage:\"\(textInputStorage)\" sentToTerminalCount:\(sentToTerminalCount) isDictating:\(isDictating)")
+
+        // Track whether we're replacing marked (composing) text - if so, we shouldn't
+        // send the intermediate text since it will be replaced by the final committed text
+        let hadMarkedText = _markedTextRange != nil
 
         let rangeToReplace = _markedTextRange ?? _selectedTextRange
         let rangeStartIndex = rangeToReplace.startPosition.offset
@@ -1100,18 +1113,31 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
         let insertedPosition = TextPosition(offset: rangeStartIndex + text.count)
         _selectedTextRange = TextRange(from: insertedPosition, to: insertedPosition)
 
+        // Don't send intermediate text during dictation - only the final result via insertDictationResult
+        if isDictating {
+            queuePendingDisplay()
+            return
+        }
+
         if terminalAccessory?.controlModifier ?? false {
             self.send(applyControlToEventCharacters(text))
             terminalAccessory?.controlModifier = false
+            sentToTerminalCount = textInputStorage.count
         } else {
             if text == "\n" {
                 resetInputBuffer()
+                sentToTerminalCount = 0
                 self.send(data: returnByteSequence [0...])
             } else {
-                self.send(txt: text)
+                // Only send if we're not in a marked text session (IME composing).
+                // Marked text is tracked in textInputStorage but not sent to terminal until committed.
+                if !hadMarkedText {
+                    self.send(txt: text)
+                    sentToTerminalCount = textInputStorage.count
+                }
             }
         }
-        
+
         queuePendingDisplay()
     }
 
@@ -1121,13 +1147,31 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
     }
     
     public func deleteBackward() {
-        uitiLog("deleteBackward() textInputStorage:\"\(textInputStorage)\" markedTextRange:\"\(_markedTextRange)\" selectedTextRange:\"\(_selectedTextRange)\"")
+        uitiLog("deleteBackward() textInputStorage:\"\(textInputStorage)\" markedTextRange:\"\(_markedTextRange)\" selectedTextRange:\"\(_selectedTextRange)\" sentToTerminalCount:\(sentToTerminalCount) isDictating:\(isDictating)")
         inputDelegate?.selectionWillChange(self)
 
         // after backward deletion, marked range is always cleared, and length of selected range is always zero
         let rangeToDelete = _markedTextRange ?? _selectedTextRange
         var rangeStartPosition = rangeToDelete.startPosition
         var rangeStartIndex = rangeStartPosition.offset
+
+        // During dictation, just update the buffer without sending to terminal
+        if isDictating {
+            if rangeToDelete.isEmpty {
+                if rangeStartIndex > 0 {
+                    rangeStartIndex -= 1
+                    textInputStorage.remove(at: textInputStorage.index(textInputStorage.startIndex, offsetBy: rangeStartIndex))
+                    rangeStartPosition = TextPosition(offset: rangeStartIndex)
+                }
+            } else {
+                textInputStorage.removeSubrange(rangeToDelete.fullRange(in: textInputStorage))
+            }
+            _markedTextRange = nil
+            _selectedTextRange = TextRange(from: rangeStartPosition, to: rangeStartPosition)
+            inputDelegate?.selectionDidChange(self)
+            return
+        }
+
         if rangeToDelete.isEmpty {
             // If there is no selected text, delete the character before the cursor
 
@@ -1144,19 +1188,27 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
             textInputStorage.remove(at: textInputStorage.index(textInputStorage.startIndex, offsetBy: rangeStartIndex))
             rangeStartPosition = TextPosition(offset: rangeStartIndex)
 
-            self.send ([backspaceSendsControlH ? 8 : 0x7f])
-        } else {
-            // Send as many backspaces that are in the range to delete. When on auto-repeat, after a some time
-            // pressing the backspace, it will delete chunks of text at a time.
-            let oldText = textInputStorage[rangeToDelete.fullRange(in: textInputStorage)]
-            let backspaces = oldText.count
-            for _ in 0..<backspaces {
+            // Only send backspace if we're deleting text that was actually sent to the terminal
+            if sentToTerminalCount > 0 {
                 self.send ([backspaceSendsControlH ? 8 : 0x7f])
+                sentToTerminalCount -= 1
+            }
+        } else {
+            // Deleting a range (marked text or selection)
+            let rangeLength = rangeToDelete.length
+
+            // Only send backspaces for characters that were actually sent to the terminal
+            let charsToDeleteFromTerminal = min(rangeLength, max(0, sentToTerminalCount - rangeToDelete.startPosition.offset))
+            if charsToDeleteFromTerminal > 0 {
+                for _ in 0..<charsToDeleteFromTerminal {
+                    self.send ([backspaceSendsControlH ? 8 : 0x7f])
+                }
+                sentToTerminalCount -= charsToDeleteFromTerminal
             }
 
             textInputStorage.removeSubrange(rangeToDelete.fullRange(in: textInputStorage))
         }
-        
+
         _markedTextRange = nil
         _selectedTextRange = TextRange(from: rangeStartPosition, to: rangeStartPosition)
 

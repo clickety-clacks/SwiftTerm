@@ -182,6 +182,7 @@ extension TerminalView: UITextInput {
         textInputStorage = ""
         _selectedTextRange = TextRange (from: TextPosition(offset: 0), to: TextPosition(offset: 0))
         _markedTextRange = nil
+        sentToTerminalCount = 0
         inputDelegate?.selectionDidChange(self)
     }
     
@@ -302,31 +303,51 @@ extension TerminalView: UITextInput {
 
     public func dictationRecordingDidEnd() {
         uitiLog("dictationRecordingDidEnd() textInputStorage:\"\(String(textInputStorage))\" count:\(textInputStorage.count) marked:\(_markedTextRange?.description ?? "nil") selected:\(_selectedTextRange.description)")
+        // Dictation recording has ended - the final result will come via insertDictationResult
     }
-    
+
     public func dictationRecognitionFailed() {
         uitiLog("dictationRecognitionFailed() textInputStorage:\"\(String(textInputStorage))\" count:\(textInputStorage.count) marked:\(_markedTextRange?.description ?? "nil") selected:\(_selectedTextRange.description)")
+        isDictating = false
+        // Clear any unsent dictation text from the buffer
+        resetInputBuffer()
     }
-    
+
     // MARK: - Dictation Placeholder Support
-    
+
     public var insertDictationResultPlaceholder: Any {
+        uitiLog("insertDictationResultPlaceholder getter - starting dictation")
+        isDictating = true
         return "[DICTATION]"
     }
-        
+
     public func removeDictationResultPlaceholder(_ placeholder: Any, willInsertResult: Bool) {
         uitiLog("removeDictationResultPlaceholder placeholder: \(placeholder), willInsertResult: \(willInsertResult)")
+        // Dictation is ending - clear intermediate text that wasn't sent
+        if isDictating {
+            // Clear the buffer of any intermediate dictation results
+            textInputStorage = ""
+            _selectedTextRange = TextRange(from: TextPosition(offset: 0), to: TextPosition(offset: 0))
+            _markedTextRange = nil
+            // sentToTerminalCount should already be 0 since we didn't send during dictation
+        }
+        isDictating = false
     }
-    
+
     public func insertDictationResult(_ dictationResult: [UIDictationPhrase]) {
         uitiLog("insertDictationResult() phrases: \(dictationResult)")
         uitiLog("textInputStorage:\"\(String(textInputStorage))\" count:\(textInputStorage.count) marked:\(_markedTextRange?.description ?? "nil") selected:\(_selectedTextRange.description)")
-        
+
+        // This is the final committed dictation result - send it to the terminal
+        isDictating = false
+
         // Combine all phrases into a single string
         let combinedText = dictationResult.map { $0.text }.joined()
 
         if combinedText.count > 0 {
-            insertText(combinedText)
+            // Send directly to terminal, bypassing insertText to avoid any filtering
+            self.send(txt: combinedText)
+            resetInputBuffer()
         }
     }
     
