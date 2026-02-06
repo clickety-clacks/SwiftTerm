@@ -71,8 +71,8 @@ struct LineRenderOutput {
     let ctLines: [CTLine]
 }
 
-struct LineLayoutCacheMetrics: Sendable {
-    enum InvalidationReason: String {
+public struct LineLayoutCacheMetrics: Sendable {
+    public enum InvalidationReason: String {
         case viewport
         case scrollInvariant
         case selection
@@ -80,21 +80,21 @@ struct LineLayoutCacheMetrics: Sendable {
         case bufferTrim
     }
 
-    private(set) var hits: UInt64 = 0
-    private(set) var misses: UInt64 = 0
-    private(set) var totalInvalidatedRows: UInt64 = 0
-    private(set) var resetCount: UInt64 = 0
-    private(set) var viewportInvalidations: UInt64 = 0
-    private(set) var scrollInvariantInvalidations: UInt64 = 0
-    private(set) var selectionInvalidations: UInt64 = 0
-    private(set) var explicitInvalidations: UInt64 = 0
-    private(set) var bufferTrimInvalidations: UInt64 = 0
-    private(set) var lastViewportRange: ClosedRange<Int>?
-    private(set) var lastScrollInvariantRange: ClosedRange<Int>?
-    private(set) var lastSelectionRange: ClosedRange<Int>?
-    private(set) var totalMissDuration: TimeInterval = 0
-    private(set) var maxMissDuration: TimeInterval = 0
-    private(set) var lastMissDuration: TimeInterval = 0
+    public private(set) var hits: UInt64 = 0
+    public private(set) var misses: UInt64 = 0
+    public private(set) var totalInvalidatedRows: UInt64 = 0
+    public private(set) var resetCount: UInt64 = 0
+    public private(set) var viewportInvalidations: UInt64 = 0
+    public private(set) var scrollInvariantInvalidations: UInt64 = 0
+    public private(set) var selectionInvalidations: UInt64 = 0
+    public private(set) var explicitInvalidations: UInt64 = 0
+    public private(set) var bufferTrimInvalidations: UInt64 = 0
+    public private(set) var lastViewportRange: ClosedRange<Int>?
+    public private(set) var lastScrollInvariantRange: ClosedRange<Int>?
+    public private(set) var lastSelectionRange: ClosedRange<Int>?
+    public private(set) var totalMissDuration: TimeInterval = 0
+    public private(set) var maxMissDuration: TimeInterval = 0
+    public private(set) var lastMissDuration: TimeInterval = 0
 
     mutating func recordHit() {
         hits &+= 1
@@ -160,26 +160,26 @@ struct LineLayoutCacheMetrics: Sendable {
         recordInvalidation(reason: .bufferTrim, range: range, removedRows: removedRows)
     }
 
-    var hitRate: Double? {
+    public var hitRate: Double? {
         let total = hits + misses
         guard total > 0 else { return nil }
         return Double(hits) / Double(total)
     }
 
-    var averageMissDurationSeconds: TimeInterval? {
+    public var averageMissDurationSeconds: TimeInterval? {
         guard misses > 0 else { return nil }
         return totalMissDuration / Double(misses)
     }
 
-    var lastMissDurationMilliseconds: Double? {
+    public var lastMissDurationMilliseconds: Double? {
         lastMissDuration > 0 ? lastMissDuration * 1_000 : nil
     }
 
-    var maxMissDurationMilliseconds: Double? {
+    public var maxMissDurationMilliseconds: Double? {
         maxMissDuration > 0 ? maxMissDuration * 1_000 : nil
     }
 
-    var averageMissDurationMilliseconds: Double? {
+    public var averageMissDurationMilliseconds: Double? {
         averageMissDurationSeconds.map { $0 * 1_000 }
     }
 }
@@ -550,16 +550,22 @@ extension TerminalView {
         }
     }
 
-    func resetLineLayoutCacheStats() {
+    @MainActor
+    public func resetLineLayoutCacheStats() {
+        precondition(Thread.isMainThread, "resetLineLayoutCacheStats must be invoked on the main thread")
         lineLayoutCacheMetrics.resetLookupCounters()
     }
 
-    func lineLayoutCacheStats() -> (hits: Int, misses: Int) {
+    @MainActor
+    public func lineLayoutCacheStats() -> (hits: Int, misses: Int) {
+        precondition(Thread.isMainThread, "lineLayoutCacheStats must be invoked on the main thread")
         let snapshot = lineLayoutCacheMetricsSnapshot()
         return (hits: Int(snapshot.hits), misses: Int(snapshot.misses))
     }
     
-    func lineLayoutCacheMetricsSnapshot() -> LineLayoutCacheMetrics {
+    @MainActor
+    public func lineLayoutCacheMetricsSnapshot() -> LineLayoutCacheMetrics {
+        precondition(Thread.isMainThread, "lineLayoutCacheMetricsSnapshot must be invoked on the main thread")
         lineLayoutCacheMetrics
     }
     
