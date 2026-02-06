@@ -566,7 +566,7 @@ extension TerminalView {
     @MainActor
     public func lineLayoutCacheMetricsSnapshot() -> LineLayoutCacheMetrics {
         precondition(Thread.isMainThread, "lineLayoutCacheMetricsSnapshot must be invoked on the main thread")
-        lineLayoutCacheMetrics
+        return lineLayoutCacheMetrics
     }
     
     func logLineLayoutCacheMetrics(context: String) {
